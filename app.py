@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 
-from utils.feature_engineering import add_technical_features
+from feature_engineering import add_technical_features
 
 APP_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = APP_ROOT / "models" / "random_forest_model.joblib"
