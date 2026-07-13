@@ -1,208 +1,399 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Any
-import os
-import time
-import requests
-import joblib
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-import streamlit as st
-import yfinance as yf
 
-from feature_engineering import add_technical_features
+import streamlit as st
+
+from agent import ask_agent
+
+
+# ---------------------------------------------------------
+# APP CONFIGURATION
+# ---------------------------------------------------------
 
 APP_ROOT = Path(__file__).resolve().parent
-MODEL_PATH = APP_ROOT / "models" / "random_forest_model.joblib"
-METADATA_PATH = APP_ROOT / "models" / "model_metadata.json"
+LOGO_PATH = APP_ROOT / "assets" / "logo.png"
 
-st.set_page_config(page_title="SWINGPULSE", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="SWINGPULSE AI",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-@st.cache_resource
-def load_assets():
-    model = joblib.load(MODEL_PATH)
-    with METADATA_PATH.open("r", encoding="utf-8") as f:
-        metadata = json.load(f)
-    return model, metadata
 
-@st.cache_data(ttl=900, show_spinner=False)
-def download_stock(symbol: str, period: str = "2y") -> pd.DataFrame:
-    symbol = symbol.upper().strip()
-    data = yf.download(
-        symbol,
-        period=period,
-        interval="1d",
-        auto_adjust=False,
-        actions=True,
-        progress=False,
-        threads=False,
-    )
-    if data.empty:
-        raise ValueError(f"No Yahoo Finance data returned for {symbol}.")
-    data = data.reset_index()
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
-    data.columns = [str(c).strip().replace(" ", "_") for c in data.columns]
-    if "Adj_Close" in data.columns:
-        data = data.drop(columns=["Adj_Close"])
-    data["Symbol"] = symbol
-    return data
+# ---------------------------------------------------------
+# DESIGN
+# ---------------------------------------------------------
 
-def signal_from_probability(probability: float, threshold: float) -> str:
-    if probability >= threshold + 0.15:
-        return "Strong Watch"
-    if probability >= threshold:
-        return "Watch"
-    if probability >= threshold - 0.10:
-        return "Neutral"
-    return "Low Potential"
+st.markdown(
+    """
+    <style>
 
-def interpret_rsi(value: float) -> str:
-    if value >= 70:
-        return "Overbought"
-    if value <= 30:
-        return "Oversold"
-    if value >= 55:
-        return "Positive momentum"
-    if value <= 45:
-        return "Weak momentum"
-    return "Neutral momentum"
-
-def analyze_stock(symbol: str, model: Any, metadata: dict[str, Any]) -> dict[str, Any]:
-    feature_columns = metadata["features"]
-    threshold = float(metadata["decision_threshold"])
-    raw = download_stock(symbol)
-    featured = add_technical_features(raw)
-    valid = featured.dropna(subset=feature_columns)
-    if valid.empty:
-        raise ValueError(f"Not enough historical data for {symbol}.")
-    latest = valid.iloc[-1]
-    model_input = pd.DataFrame(
-        [latest[feature_columns].to_dict()],
-        columns=feature_columns,
-    ).replace([np.inf, -np.inf], np.nan)
-    probability = float(model.predict_proba(model_input)[0, 1])
-
-    ema20 = float(latest["EMA_20"])
-    ema50 = float(latest["EMA_50"])
-    ema200 = float(latest["EMA_200"])
-    if ema20 > ema50 > ema200:
-        trend = "Strong bullish trend"
-    elif ema20 < ema50 < ema200:
-        trend = "Strong bearish trend"
-    elif ema20 > ema50:
-        trend = "Short-term bullish trend"
-    else:
-        trend = "Mixed trend"
-
-    return {
-        "symbol": symbol.upper().strip(),
-        "date": pd.to_datetime(latest["Date"]),
-        "close": float(latest["Close"]),
-        "probability": probability,
-        "signal": signal_from_probability(probability, threshold),
-        "rsi": float(latest["RSI_14"]),
-        "rsi_status": interpret_rsi(float(latest["RSI_14"])),
-        "macd": float(latest["MACD"]),
-        "macd_signal": float(latest["MACD_Signal"]),
-        "macd_status": "Bullish" if float(latest["MACD"]) > float(latest["MACD_Signal"]) else "Bearish",
-        "trend": trend,
-        "atr": float(latest["ATR_14"]),
-        "volatility": float(latest["Volatility_20"]),
-        "history": featured,
+    /* Main page */
+    .stApp {
+        background:
+            linear-gradient(
+                180deg,
+                #F5FBFC 0%,
+                #FFFFFF 45%,
+                #F7FAFC 100%
+            );
     }
 
-def price_chart(history: pd.DataFrame, symbol: str):
-    chart_data = history.dropna(subset=["Date", "Close"]).tail(180)
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=chart_data["Date"],
-        open=chart_data["Open"],
-        high=chart_data["High"],
-        low=chart_data["Low"],
-        close=chart_data["Close"],
-        name=symbol,
-    ))
-    fig.add_trace(go.Scatter(x=chart_data["Date"], y=chart_data["EMA_20"], mode="lines", name="EMA 20"))
-    fig.add_trace(go.Scatter(x=chart_data["Date"], y=chart_data["EMA_50"], mode="lines", name="EMA 50"))
-    fig.update_layout(height=500, xaxis_rangeslider_visible=False, title=f"{symbol} — Price")
-    return fig
+    .block-container {
+        max-width: 1050px;
+        padding-top: 1.4rem;
+        padding-bottom: 3rem;
+    }
 
-def scan_rsi(symbols, minimum_rsi, maximum_rsi, model, metadata):
-    rows = []
-    progress = st.progress(0)
-    for i, symbol in enumerate(symbols, start=1):
-        try:
-            result = analyze_stock(symbol, model, metadata)
-            if minimum_rsi <= result["rsi"] <= maximum_rsi:
-                rows.append({
-                    "Symbol": result["symbol"],
-                    "Date": result["date"].date(),
-                    "Close": result["close"],
-                    "RSI": result["rsi"],
-                    "Probability": result["probability"],
-                    "Signal": result["signal"],
-                })
-        except Exception:
-            pass
-        progress.progress(i / len(symbols))
-    progress.empty()
-    return pd.DataFrame(rows)
+    /* Hide Streamlit default elements */
+    #MainMenu {
+        visibility: hidden;
+    }
 
-model, metadata = load_assets()
+    footer {
+        visibility: hidden;
+    }
 
-st.title("📈 SWINGPULSE")
-st.caption("Live stock analysis powered by Yahoo Finance and a trained Random Forest model.")
+    header {
+        background: transparent;
+    }
+
+    /* Header */
+    .swingpulse-title {
+        font-size: 2.45rem;
+        font-weight: 800;
+        color: #17324D;
+        margin: 0;
+        line-height: 1.1;
+    }
+
+    .swingpulse-subtitle {
+        font-size: 1rem;
+        color: #5D7488;
+        margin-top: 0.35rem;
+        margin-bottom: 1.4rem;
+    }
+
+    .agent-badge {
+        display: inline-block;
+        padding: 0.35rem 0.75rem;
+        border-radius: 999px;
+        background: #DFF7F4;
+        color: #087D78;
+        font-size: 0.82rem;
+        font-weight: 700;
+        margin-bottom: 0.8rem;
+    }
+
+    /* Chat messages */
+    [data-testid="stChatMessage"] {
+        border: 1px solid #DDE9EE;
+        border-radius: 18px;
+        padding: 0.6rem 0.8rem;
+        margin-bottom: 0.8rem;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 5px 18px rgba(44, 92, 112, 0.06);
+    }
+
+    /* Chat input */
+    [data-testid="stChatInput"] {
+        border-radius: 18px;
+    }
+
+    [data-testid="stChatInput"] textarea {
+        font-size: 1rem;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid #B9DEDD;
+        background: white;
+        color: #24546A;
+        font-weight: 600;
+        transition: 0.2s;
+    }
+
+    .stButton > button:hover {
+        border-color: #21A7A0;
+        color: #087D78;
+        background: #EEFBFA;
+    }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background:
+            linear-gradient(
+                180deg,
+                #EDF9FA 0%,
+                #F8FCFD 100%
+            );
+        border-right: 1px solid #D8EAED;
+    }
+
+    /* Information card */
+    .info-card {
+        background: white;
+        border: 1px solid #DCEBED;
+        border-radius: 15px;
+        padding: 1rem;
+        color: #496474;
+        font-size: 0.88rem;
+        line-height: 1.55;
+        margin-top: 1rem;
+    }
+
+    .disclaimer {
+        color: #718796;
+        font-size: 0.78rem;
+        text-align: center;
+        padding-top: 1.5rem;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ---------------------------------------------------------
+# SESSION STATE
+# ---------------------------------------------------------
+
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "שלום, אני **SWINGPULSE AI**. 📈\n\n"
+                "אפשר לבקש ממני לנתח מניה, להשוות בין מניות, "
+                "לסרוק RSI או להסביר אינדיקטורים טכניים.\n\n"
+                "לדוגמה: **תנתח לי את AAPL**"
+            ),
+        }
+    ]
+
+if "pending_prompt" not in st.session_state:
+    st.session_state.pending_prompt = None
+
+
+# ---------------------------------------------------------
+# SIDEBAR
+# ---------------------------------------------------------
 
 with st.sidebar:
-    symbol = st.text_input("Stock symbol", "AAPL").upper().strip()
-    analyze_clicked = st.button("Analyze Stock", use_container_width=True, type="primary")
-    st.divider()
-    min_rsi, max_rsi = st.slider("RSI range", 0, 100, (26, 35))
-    ticker_text = st.text_area(
-        "Symbols to scan",
-        "AAPL, MSFT, NVDA, AMD, META, AMZN, TSLA, GOOGL",
-        height=120,
-    )
-    scan_clicked = st.button("Scan RSI Range", use_container_width=True)
 
-if analyze_clicked or not scan_clicked:
-    with st.spinner(f"Analyzing {symbol}..."):
-        try:
-            result = analyze_stock(symbol, model, metadata)
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Latest close", f"${result['close']:.2f}")
-            c2.metric("Model probability", f"{result['probability'] * 100:.2f}%")
-            c3.metric("Signal", result["signal"])
-            c4.metric("RSI", f"{result['rsi']:.2f}")
-            st.plotly_chart(price_chart(result["history"], result["symbol"]), use_container_width=True)
-            st.dataframe(pd.DataFrame({
-                "Indicator": ["RSI status", "MACD", "Trend", "ATR", "Volatility"],
-                "Value": [
-                    result["rsi_status"],
-                    result["macd_status"],
-                    result["trend"],
-                    f"{result['atr']:.4f}",
-                    f"{result['volatility']:.2%}",
-                ],
-            }), hide_index=True, use_container_width=True)
-        except Exception as e:
-            st.error(str(e))
-
-if scan_clicked:
-    symbols = [x.strip().upper() for x in ticker_text.replace("\n", ",").split(",") if x.strip()]
-    results = scan_rsi(symbols, min_rsi, max_rsi, model, metadata)
-    st.subheader(f"RSI scanner results: {min_rsi}–{max_rsi}")
-    if results.empty:
-        st.info("No matching stocks were found.")
+    if LOGO_PATH.exists():
+        st.image(
+            str(LOGO_PATH),
+            use_container_width=True,
+        )
     else:
-        results["Close"] = results["Close"].map(lambda x: f"${x:.2f}")
-        results["RSI"] = results["RSI"].map(lambda x: f"{x:.2f}")
-        results["Probability"] = results["Probability"].map(lambda x: f"{x * 100:.2f}%")
-        st.dataframe(results, hide_index=True, use_container_width=True)
+        st.markdown("## 📈 SWINGPULSE")
 
-st.divider()
-st.caption("Educational project only. Not financial advice.")
+    st.markdown("### שאלות לדוגמה")
+
+    example_prompts = [
+        (
+            "נתח את AAPL",
+            "תנתח לי את AAPL ותסביר את התוצאה.",
+        ),
+        (
+            "השווה NVDA ו־AMD",
+            "השווה בין NVDA ל-AMD ותגיד איזו נראית חזקה יותר.",
+        ),
+        (
+            "מניות סביב RSI 30",
+            "מצא מניות עם RSI בין 26 ל-35.",
+        ),
+        (
+            "הסתברות מעל 45%",
+            "מצא מניות עם הסתברות מודל מעל 45 אחוז.",
+        ),
+        (
+            "הסבר MACD",
+            "מה זה MACD ואיך מפרשים אותו?",
+        ),
+    ]
+
+    for index, (button_label, prompt_text) in enumerate(
+        example_prompts
+    ):
+        if st.button(
+            button_label,
+            key=f"example_{index}",
+        ):
+            st.session_state.pending_prompt = prompt_text
+
+    st.divider()
+
+    if st.button(
+        "🗑️ נקה את השיחה",
+        key="clear_chat",
+    ):
+        st.session_state.messages = [
+            {
+                "role": "assistant",
+                "content": (
+                    "השיחה נוקתה. מה תרצה לבדוק?"
+                ),
+            }
+        ]
+        st.session_state.pending_prompt = None
+        st.rerun()
+
+    st.markdown(
+        """
+        <div class="info-card">
+            <b>איך המערכת עובדת?</b><br><br>
+            הסוכן מבין את השאלה, בוחר כלי מתאים,
+            מושך נתוני שוק, מחשב אינדיקטורים ומפעיל
+            את מודל ה־Random Forest של SWINGPULSE.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------
+# HEADER
+# ---------------------------------------------------------
+
+header_left, header_right = st.columns(
+    [1, 4],
+    vertical_alignment="center",
+)
+
+with header_left:
+    if LOGO_PATH.exists():
+        st.image(
+            str(LOGO_PATH),
+            width=150,
+        )
+
+with header_right:
+    st.markdown(
+        '<div class="agent-badge">LIVE AI MARKET AGENT</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<h1 class="swingpulse-title">SWINGPULSE AI</h1>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="swingpulse-subtitle">
+            שאל שאלות על מניות בשפה חופשית וקבל ניתוח
+            המבוסס על נתוני שוק, אינדיקטורים טכניים ומודל ML.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------
+# CHAT HISTORY
+# ---------------------------------------------------------
+
+for message in st.session_state.messages:
+
+    avatar = (
+        "🤖"
+        if message["role"] == "assistant"
+        else "👤"
+    )
+
+    with st.chat_message(
+        message["role"],
+        avatar=avatar,
+    ):
+        st.markdown(message["content"])
+
+
+# ---------------------------------------------------------
+# CHAT INPUT
+# ---------------------------------------------------------
+
+typed_prompt = st.chat_input(
+    "לדוגמה: מצא מניות עם RSI בין 26 ל־35"
+)
+
+prompt = typed_prompt
+
+if st.session_state.pending_prompt:
+    prompt = st.session_state.pending_prompt
+    st.session_state.pending_prompt = None
+
+
+# ---------------------------------------------------------
+# AGENT RESPONSE
+# ---------------------------------------------------------
+
+if prompt:
+
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": prompt,
+        }
+    )
+
+    with st.chat_message(
+        "user",
+        avatar="👤",
+    ):
+        st.markdown(prompt)
+
+    previous_messages = (
+        st.session_state.messages[:-1]
+    )
+
+    with st.chat_message(
+        "assistant",
+        avatar="🤖",
+    ):
+
+        with st.spinner(
+            "SWINGPULSE מנתח את הבקשה..."
+        ):
+
+            try:
+                answer = ask_agent(
+                    user_message=prompt,
+                    conversation_history=previous_messages,
+                )
+
+            except Exception as error:
+                answer = (
+                    "לא הצלחתי להשלים את הבקשה כרגע.\n\n"
+                    f"שגיאה: `{error}`"
+                )
+
+        st.markdown(answer)
+
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": answer,
+        }
+    )
+
+
+# ---------------------------------------------------------
+# FOOTER
+# ---------------------------------------------------------
+
+st.markdown(
+    """
+    <div class="disclaimer">
+        SWINGPULSE הוא פרויקט לימודי המבוסס על נתוני עבר
+        ומודל ניסיוני. המידע אינו ייעוץ פיננסי ואינו מבטיח תשואה.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
