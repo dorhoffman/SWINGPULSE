@@ -1,0 +1,31 @@
+{
+    "prediction_horizon": 10,
+    "target_return": 0.1,
+    "features": [
+        "Daily_Return",
+        "Volume_Change",
+        "SMA_20",
+        "SMA_50",
+        "SMA_200",
+        "EMA_20",
+        "EMA_50",
+        "EMA_200",
+        "RSI_14",
+        "MACD",
+        "MACD_Signal",
+        "MACD_Histogram",
+        "BB_Width",
+        "ATR_14",
+        "Volatility_20",
+        "Price_to_SMA20",
+        "Price_to_SMA50",
+        "Price_to_EMA20",
+        "EMA20_to_EMA50"
+    ],
+    "train_end_date": "2011-06-17T04:00:00.000000000",
+    "test_start_date": "2011-07-01T04:00:00.000000000",
+    "train_sample_rows": 500000,
+    "test_rows": 1473398,
+    "selected_model": "Random Forest",
+    "decision_threshold": 0.45
+}
