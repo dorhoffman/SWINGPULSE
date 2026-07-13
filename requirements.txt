@@ -6,3 +6,4 @@ joblib==1.4.2
 yfinance==0.2.66
 plotly==6.2.0
 requests==2.32.4
+openai
