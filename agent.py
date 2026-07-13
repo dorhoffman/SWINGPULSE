@@ -356,7 +356,7 @@ def ask_agent(
                 })
 
             response = client.responses.create(
-                model="gpt-5.6",
+                model="gpt-4.1-mini"
                 instructions=SYSTEM_PROMPT,
                 input=input_items,
                 tools=TOOLS,
