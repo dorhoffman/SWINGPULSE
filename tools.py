@@ -6,10 +6,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from io import StringIO
+
 import joblib
 import numpy as np
 import pandas as pd
 import requests
+import yfinance as yf
 
 from feature_engineering import add_technical_features
 
@@ -17,6 +20,16 @@ from feature_engineering import add_technical_features
 APP_ROOT = Path(__file__).resolve().parent
 MODEL_PATH = APP_ROOT / "models" / "random_forest_model.joblib"
 METADATA_PATH = APP_ROOT / "models" / "model_metadata.json"
+
+if MODEL_PATH.stat().st_size < 1024:
+    raise RuntimeError(
+        f"{MODEL_PATH.name} is only "
+        f"{MODEL_PATH.stat().st_size} bytes, which means it is still "
+        "an unresolved Git LFS pointer file rather than the actual "
+        "model. Make sure the build step runs "
+        "'git lfs install && git lfs pull' before installing "
+        "dependencies."
+    )
 
 MODEL = joblib.load(MODEL_PATH)
 
@@ -29,98 +42,165 @@ PREDICTION_HORIZON = int(METADATA["prediction_horizon"])
 TARGET_RETURN = float(METADATA["target_return"])
 
 
-def _get_finnhub_api_key() -> str:
+def _normalize_ohlcv(
+    data: pd.DataFrame,
+    symbol: str,
+) -> pd.DataFrame:
+    data = (
+        data
+        .sort_values("Date")
+        .drop_duplicates(subset=["Date"])
+        .reset_index(drop=True)
+    )
+
+    if data.empty:
+        raise ValueError(f"Empty dataset for {symbol}.")
+
+    data["Symbol"] = symbol
+
+    return data
+
+
+def _download_from_yfinance(
+    symbol: str,
+    days_back: int,
+) -> pd.DataFrame:
+    history = yf.Ticker(symbol).history(
+        period=f"{min(days_back, 3650)}d",
+        interval="1d",
+        auto_adjust=False,
+    )
+
+    if history is None or history.empty:
+        raise ValueError(f"yfinance returned no data for {symbol}.")
+
+    history = history.reset_index()
+
+    data = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(history["Date"]).dt.tz_localize(None),
+            "Open": history["Open"],
+            "High": history["High"],
+            "Low": history["Low"],
+            "Close": history["Close"],
+            "Volume": history["Volume"],
+        }
+    )
+
+    return _normalize_ohlcv(data, symbol)
+
+
+def _download_from_stooq(
+    symbol: str,
+    days_back: int,
+) -> pd.DataFrame:
+    stooq_symbol = f"{symbol.lower()}.us"
+    url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
+
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+
+    text = response.text
+
+    if not text or "Date" not in text.splitlines()[0]:
+        raise ValueError(f"Stooq returned no data for {symbol}.")
+
+    raw = pd.read_csv(StringIO(text))
+    raw["Date"] = pd.to_datetime(raw["Date"], errors="coerce")
+
+    cutoff = pd.Timestamp.now() - pd.Timedelta(days=days_back)
+    raw = raw[raw["Date"] >= cutoff]
+
+    data = raw[["Date", "Open", "High", "Low", "Close", "Volume"]].copy()
+
+    return _normalize_ohlcv(data, symbol)
+
+
+def _download_from_finnhub(
+    symbol: str,
+    days_back: int,
+) -> pd.DataFrame:
     api_key = os.getenv("FINNHUB_API_KEY")
 
     if not api_key:
-        raise RuntimeError(
-            "FINNHUB_API_KEY is not configured in the server environment."
-        )
+        raise RuntimeError("FINNHUB_API_KEY is not configured.")
 
-    return api_key
+    end_timestamp = int(time.time())
+    start_timestamp = end_timestamp - (days_back * 24 * 60 * 60)
+
+    response = requests.get(
+        "https://finnhub.io/api/v1/stock/candle",
+        params={
+            "symbol": symbol,
+            "resolution": "D",
+            "from": start_timestamp,
+            "to": end_timestamp,
+            "token": api_key,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    result = response.json()
+
+    if result.get("s") != "ok":
+        raise ValueError(f"No Finnhub market data returned for {symbol}.")
+
+    data = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(result["t"], unit="s"),
+            "Open": result["o"],
+            "High": result["h"],
+            "Low": result["l"],
+            "Close": result["c"],
+            "Volume": result["v"],
+        }
+    )
+
+    return _normalize_ohlcv(data, symbol)
 
 
 def download_stock_data(
     symbol: str,
     days_back: int = 900,
-    retries: int = 3,
+    retries: int = 2,
 ) -> pd.DataFrame:
+    """
+    Downloads daily OHLCV history for `symbol`.
+
+    Tries multiple providers in order, since each has different
+    reliability characteristics when called from a cloud host like
+    Render: yfinance can be rate-limited by Yahoo depending on the
+    server's IP, Stooq has no key but coarser coverage, and Finnhub's
+    free tier does not include the candle endpoint for most US
+    symbols (it requires a paid plan). Keeping all three means the
+    app keeps working even if one provider is temporarily unavailable.
+    """
     symbol = str(symbol).upper().strip()
 
     if not symbol:
         raise ValueError("A stock symbol is required.")
 
-    api_key = _get_finnhub_api_key()
+    providers = [
+        ("yfinance", _download_from_yfinance),
+        ("stooq", _download_from_stooq),
+        ("finnhub", _download_from_finnhub),
+    ]
 
-    end_timestamp = int(time.time())
-    start_timestamp = end_timestamp - (days_back * 24 * 60 * 60)
+    errors: list[str] = []
 
-    url = "https://finnhub.io/api/v1/stock/candle"
+    for provider_name, provider_fn in providers:
+        for attempt in range(retries):
+            try:
+                return provider_fn(symbol, days_back)
+            except Exception as error:
+                errors.append(f"{provider_name}: {error}")
 
-    params = {
-        "symbol": symbol,
-        "resolution": "D",
-        "from": start_timestamp,
-        "to": end_timestamp,
-        "token": api_key,
-    }
-
-    last_error: Exception | None = None
-
-    for attempt in range(retries):
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=30,
-            )
-            response.raise_for_status()
-
-            result = response.json()
-
-            if result.get("s") != "ok":
-                raise ValueError(
-                    f"No Finnhub market data returned for {symbol}."
-                )
-
-            data = pd.DataFrame(
-                {
-                    "Date": pd.to_datetime(
-                        result["t"],
-                        unit="s",
-                    ),
-                    "Open": result["o"],
-                    "High": result["h"],
-                    "Low": result["l"],
-                    "Close": result["c"],
-                    "Volume": result["v"],
-                }
-            )
-
-            data["Symbol"] = symbol
-
-            data = (
-                data
-                .sort_values("Date")
-                .drop_duplicates(subset=["Date"])
-                .reset_index(drop=True)
-            )
-
-            if data.empty:
-                raise ValueError(
-                    f"Finnhub returned an empty dataset for {symbol}."
-                )
-
-            return data
-
-        except Exception as error:
-            last_error = error
-
-            if attempt < retries - 1:
-                time.sleep(2 * (attempt + 1))
+                if attempt < retries - 1:
+                    time.sleep(1.5 * (attempt + 1))
 
     raise ValueError(
-        f"Could not download market data for {symbol}: {last_error}"
+        f"Could not download market data for {symbol} from any "
+        f"provider: {' | '.join(errors)}"
     )
 
 
