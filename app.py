@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import streamlit as st
@@ -9,7 +8,7 @@ from agent import ask_agent
 
 
 # =========================================================
-# APP CONFIGURATION
+# CONFIGURATION
 # =========================================================
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -24,85 +23,54 @@ st.set_page_config(
 
 
 # =========================================================
-# LANGUAGE AND DIRECTION HELPERS
-# =========================================================
-
-def contains_hebrew(text: str) -> bool:
-    """Check whether a text contains Hebrew characters."""
-    return bool(re.search(r"[\u0590-\u05FF]", str(text)))
-
-
-def render_message_content(content: str) -> None:
-    """
-    Display Hebrew messages right-to-left
-    and English messages left-to-right.
-    """
-
-    direction = "rtl" if contains_hebrew(content) else "ltr"
-    alignment = "right" if direction == "rtl" else "left"
-
-    st.markdown(
-        f"""
-        <div
-            dir="{direction}"
-            style="
-                text-align: {alignment};
-                line-height: 1.75;
-                font-size: 0.98rem;
-            "
-        >
-            {content}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-# =========================================================
-# DESIGN
+# DESIGN SYSTEM
 # =========================================================
 
 st.markdown(
     """
     <style>
-
     :root {
-        --sp-navy: #18364A;
-        --sp-blue: #258EB5;
-        --sp-teal: #22AAA1;
-        --sp-green: #43BC7B;
-        --sp-light: #F4FAFB;
-        --sp-border: #DCECEF;
-        --sp-muted: #6A8290;
+        --navy: #173A4D;
+        --blue: #2797BB;
+        --teal: #26ADA4;
+        --green: #43BC7B;
+        --surface: #FFFFFF;
+        --background: #F5FAFB;
+        --border: #DCEAED;
+        --muted: #6A818D;
     }
 
-    /* Main application background */
+    * {
+        box-sizing: border-box;
+    }
+
     .stApp {
         background:
             radial-gradient(
-                circle at 90% 0%,
-                rgba(34, 170, 161, 0.10),
+                circle at 85% 0%,
+                rgba(38, 173, 164, 0.12),
                 transparent 28%
+            ),
+            radial-gradient(
+                circle at 15% 20%,
+                rgba(39, 151, 187, 0.06),
+                transparent 22%
             ),
             linear-gradient(
                 180deg,
                 #F7FCFD 0%,
-                #FFFFFF 38%,
-                #F7FAFB 100%
+                #FFFFFF 42%,
+                #F6FAFB 100%
             );
     }
 
     .block-container {
         max-width: 1180px;
-        padding-top: 1.8rem;
-        padding-bottom: 6rem;
+        padding-top: 1.5rem;
+        padding-bottom: 7rem;
     }
 
-    /* Remove unnecessary Streamlit interface */
-    #MainMenu {
-        visibility: hidden;
-    }
-
+    #MainMenu,
     footer {
         visibility: hidden;
     }
@@ -117,86 +85,143 @@ st.markdown(
             linear-gradient(
                 180deg,
                 #ECF9FA 0%,
-                #F8FCFD 55%,
+                #F8FCFD 60%,
                 #FFFFFF 100%
             );
-        border-right: 1px solid var(--sp-border);
+        border-right: 1px solid var(--border);
     }
 
     [data-testid="stSidebarContent"] {
-        padding-top: 1.2rem;
+        padding-top: 1rem;
     }
 
-    /* Main header */
-    .sp-header {
-        background: rgba(255, 255, 255, 0.88);
-        border: 1px solid var(--sp-border);
-        border-radius: 24px;
-        padding: 1.5rem 1.8rem;
-        margin-bottom: 1.25rem;
-        box-shadow: 0 12px 36px rgba(31, 92, 110, 0.07);
+    /* Hero */
+    .hero {
+        position: relative;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 26px;
+        padding: 1.7rem 1.9rem;
+        margin-bottom: 1.2rem;
+        box-shadow: 0 18px 50px rgba(31, 86, 103, 0.08);
     }
 
-    .sp-product-name {
-        color: var(--sp-navy);
-        font-size: 2.35rem;
-        font-weight: 850;
-        line-height: 1.05;
-        letter-spacing: -0.03em;
-        margin: 0;
+    .hero::after {
+        content: "";
+        position: absolute;
+        width: 190px;
+        height: 190px;
+        right: -60px;
+        top: -80px;
+        border-radius: 50%;
+        background: linear-gradient(
+            135deg,
+            rgba(39, 151, 187, 0.10),
+            rgba(67, 188, 123, 0.10)
+        );
     }
 
-    .sp-product-description {
-        color: var(--sp-muted);
-        font-size: 1rem;
-        line-height: 1.65;
-        margin-top: 0.55rem;
-        margin-bottom: 0;
-    }
-
-    .sp-live-badge {
+    .status-badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.4rem;
+        gap: 0.45rem;
         padding: 0.38rem 0.78rem;
         border-radius: 999px;
         background: #E1F8F3;
         color: #117E72;
         font-size: 0.76rem;
-        font-weight: 750;
+        font-weight: 800;
         letter-spacing: 0.05em;
-        margin-bottom: 0.7rem;
+        margin-bottom: 0.8rem;
     }
 
-    .sp-live-dot {
+    .status-dot {
         width: 7px;
         height: 7px;
         border-radius: 50%;
-        background: #2CBB7F;
-        display: inline-block;
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgba(67, 188, 123, 0.13);
     }
 
-    /* Chat area */
+    .hero-title {
+        color: var(--navy);
+        font-size: 2.55rem;
+        line-height: 1.05;
+        font-weight: 850;
+        letter-spacing: -0.035em;
+        margin: 0;
+    }
+
+    .hero-text {
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.65;
+        margin-top: 0.65rem;
+        margin-bottom: 0;
+    }
+
+    /* Capability cards */
+    .capabilities {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.8rem;
+        margin: 1rem 0 1.35rem;
+    }
+
+    .capability-card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 1rem;
+        box-shadow: 0 8px 25px rgba(31, 86, 103, 0.045);
+    }
+
+    .capability-icon {
+        font-size: 1.4rem;
+        margin-bottom: 0.45rem;
+    }
+
+    .capability-title {
+        color: var(--navy);
+        font-size: 0.95rem;
+        font-weight: 780;
+        margin-bottom: 0.3rem;
+    }
+
+    .capability-text {
+        color: var(--muted);
+        font-size: 0.8rem;
+        line-height: 1.48;
+    }
+
+    /* Chat */
     [data-testid="stChatMessage"] {
-        background: rgba(255, 255, 255, 0.94);
-        border: 1px solid var(--sp-border);
-        border-radius: 20px;
-        padding: 0.8rem 1rem;
-        margin-bottom: 0.85rem;
-        box-shadow: 0 7px 24px rgba(43, 93, 110, 0.055);
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid var(--border);
+        border-radius: 21px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 0.8rem;
+        box-shadow: 0 8px 28px rgba(31, 86, 103, 0.055);
     }
 
-    [data-testid="stChatMessage"]:has(
-        [data-testid="chatAvatarIcon-user"]
-    ) {
-        background: #F0FAFA;
-        border-color: #CFEAE8;
+    [data-testid="stChatMessageContent"] {
+        color: #294B5D;
+        font-size: 0.98rem;
+        line-height: 1.75;
+
+        /*
+        Automatically supports English LTR and Hebrew RTL
+        according to each paragraph's text.
+        */
+        unicode-bidi: plaintext;
+        text-align: start;
     }
 
-    /* Chat input */
     [data-testid="stChatInput"] {
         border-radius: 18px;
-        box-shadow: 0 10px 32px rgba(32, 91, 108, 0.12);
+        box-shadow: 0 12px 34px rgba(31, 86, 103, 0.14);
     }
 
     [data-testid="stChatInput"] textarea {
@@ -206,12 +231,12 @@ st.markdown(
     /* Buttons */
     .stButton > button {
         width: 100%;
-        min-height: 2.65rem;
+        min-height: 2.75rem;
         border-radius: 13px;
-        border: 1px solid #C7E3E6;
-        background: rgba(255, 255, 255, 0.90);
+        border: 1px solid #C6E1E5;
+        background: rgba(255, 255, 255, 0.92);
         color: #285368;
-        font-weight: 650;
+        font-weight: 680;
         text-align: left;
         transition:
             transform 0.16s ease,
@@ -221,82 +246,52 @@ st.markdown(
 
     .stButton > button:hover {
         transform: translateY(-1px);
-        border-color: var(--sp-teal);
-        color: #0D7E77;
+        border-color: var(--teal);
+        color: #087D78;
         background: #EAF9F7;
     }
 
-    /* Sidebar cards */
-    .sp-sidebar-title {
-        color: var(--sp-navy);
-        font-size: 1rem;
-        font-weight: 750;
-        margin-top: 1rem;
-        margin-bottom: 0.75rem;
+    /* Sidebar */
+    .sidebar-heading {
+        color: var(--navy);
+        font-size: 0.95rem;
+        font-weight: 780;
+        margin: 1rem 0 0.7rem;
     }
 
-    .sp-info-card {
+    .sidebar-card {
         background: rgba(255, 255, 255, 0.90);
-        border: 1px solid var(--sp-border);
+        border: 1px solid var(--border);
         border-radius: 16px;
         padding: 1rem;
-        color: #55707E;
+        color: #57717E;
         font-size: 0.84rem;
         line-height: 1.6;
         margin-top: 1rem;
     }
 
-    .sp-info-card b {
-        color: var(--sp-navy);
+    .sidebar-card b {
+        color: var(--navy);
     }
 
-    /* Welcome prompts */
-    .sp-capabilities {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.75rem;
-        margin: 1rem 0 1.25rem;
-    }
-
-    .sp-capability-card {
-        background: rgba(255, 255, 255, 0.90);
-        border: 1px solid var(--sp-border);
-        border-radius: 16px;
-        padding: 0.95rem;
-        min-height: 105px;
-    }
-
-    .sp-capability-title {
-        color: var(--sp-navy);
-        font-weight: 750;
-        font-size: 0.91rem;
-        margin-bottom: 0.3rem;
-    }
-
-    .sp-capability-text {
-        color: var(--sp-muted);
-        font-size: 0.79rem;
-        line-height: 1.45;
-    }
-
-    .sp-disclaimer {
-        max-width: 880px;
+    .footer-note {
+        max-width: 900px;
         margin: 2rem auto 0;
+        border-top: 1px solid #DFEAED;
         padding-top: 1rem;
-        border-top: 1px solid #E1ECEF;
-        color: #8496A0;
+        color: #82959E;
         font-size: 0.76rem;
-        text-align: center;
         line-height: 1.55;
+        text-align: center;
     }
 
     @media (max-width: 850px) {
-        .sp-capabilities {
+        .capabilities {
             grid-template-columns: 1fr;
         }
 
-        .sp-product-name {
-            font-size: 1.85rem;
+        .hero-title {
+            font-size: 1.9rem;
         }
 
         .block-container {
@@ -304,7 +299,6 @@ st.markdown(
             padding-right: 1rem;
         }
     }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -315,12 +309,16 @@ st.markdown(
 # SESSION STATE
 # =========================================================
 
-WELCOME_MESSAGE = (
-    "Hello! I’m **SWINGPULSE AI**, your stock-market research agent. 📈\n\n"
-    "You can ask me to analyze a stock, compare companies, scan for "
-    "technical conditions, or explain indicators.\n\n"
-    "You may ask questions in **English or Hebrew**."
-)
+WELCOME_MESSAGE = """
+Hello! I’m **SWINGPULSE AI**, your stock-market research agent. 📈
+
+I can analyze stocks, compare companies, scan technical conditions,
+and explain indicators using market data and the SWINGPULSE machine-learning model.
+
+You can ask questions in **English or Hebrew**.
+
+Try: **Analyze AAPL**
+"""
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
@@ -349,45 +347,45 @@ with st.sidebar:
         st.markdown("## 📈 SWINGPULSE")
 
     st.markdown(
-        '<div class="sp-sidebar-title">Quick actions</div>',
+        '<div class="sidebar-heading">Quick actions</div>',
         unsafe_allow_html=True,
     )
 
-    example_prompts = [
+    examples = [
         (
             "Analyze AAPL",
             "Analyze AAPL and explain the model result.",
         ),
         (
             "Compare NVDA and AMD",
-            "Compare NVDA and AMD. Which currently appears stronger?",
+            "Compare NVDA and AMD and explain which currently appears stronger.",
         ),
         (
             "Find stocks near RSI 30",
             "Find stocks with an RSI between 26 and 35.",
         ),
         (
-            "Find probability above 45%",
+            "Probability above 45%",
             "Find stocks with a model probability above 45 percent.",
         ),
         (
             "Explain MACD",
-            "Explain MACD and how traders commonly interpret it.",
+            "Explain MACD and how it is commonly interpreted.",
         ),
     ]
 
-    for index, (label, prompt_text) in enumerate(example_prompts):
+    for index, (label, prompt_text) in enumerate(examples):
         if st.button(
             label,
-            key=f"example_prompt_{index}",
+            key=f"quick_action_{index}",
         ):
             st.session_state.pending_prompt = prompt_text
 
     st.divider()
 
     if st.button(
-        "Clear conversation",
-        key="clear_conversation",
+        "🗑️ Clear conversation",
+        key="clear_chat",
     ):
         st.session_state.messages = [
             {
@@ -400,11 +398,11 @@ with st.sidebar:
 
     st.markdown(
         """
-        <div class="sp-info-card">
-            <b>How does it work?</b><br><br>
-            The agent interprets your request, selects an analytical
-            tool, retrieves market data, calculates technical indicators,
-            and runs the SWINGPULSE Random Forest model.
+        <div class="sidebar-card">
+            <b>How it works</b><br><br>
+            The agent understands your request, selects an analytical
+            tool, retrieves market data, calculates indicators, and
+            applies the SWINGPULSE Random Forest model.
         </div>
         """,
         unsafe_allow_html=True,
@@ -412,10 +410,10 @@ with st.sidebar:
 
     st.markdown(
         """
-        <div class="sp-info-card">
-            <b>Supported languages</b><br><br>
-            You can write in English or Hebrew. The interface remains
-            in English, while the agent can respond in the language
+        <div class="sidebar-card">
+            <b>Language support</b><br><br>
+            The interface is in English. You can ask questions in
+            English or Hebrew, and the agent responds in the language
             used in your question.
         </div>
         """,
@@ -424,68 +422,65 @@ with st.sidebar:
 
 
 # =========================================================
-# HEADER
+# HERO
 # =========================================================
 
 st.markdown(
     """
-    <div class="sp-header">
-        <div class="sp-live-badge">
-            <span class="sp-live-dot"></span>
+    <section class="hero">
+        <div class="status-badge">
+            <span class="status-dot"></span>
             LIVE AI MARKET AGENT
         </div>
 
-        <h1 class="sp-product-name">
+        <h1 class="hero-title">
             SWINGPULSE AI
         </h1>
 
-        <p class="sp-product-description">
+        <p class="hero-text">
             Ask natural-language questions about stocks and receive
-            analysis powered by live market data, technical indicators,
+            analysis powered by market data, technical indicators,
             and a trained machine-learning model.
         </p>
-    </div>
+    </section>
     """,
     unsafe_allow_html=True,
 )
 
 
 # =========================================================
-# CAPABILITY CARDS
+# CAPABILITIES
 # =========================================================
 
 if len(st.session_state.messages) == 1:
     st.markdown(
         """
-        <div class="sp-capabilities">
+        <div class="capabilities">
 
-            <div class="sp-capability-card">
-                <div class="sp-capability-title">
-                    📊 Stock analysis
-                </div>
-                <div class="sp-capability-text">
-                    Review model probability, RSI, MACD,
-                    volatility and trend information.
+            <div class="capability-card">
+                <div class="capability-icon">📊</div>
+                <div class="capability-title">Stock analysis</div>
+                <div class="capability-text">
+                    Review probability, RSI, MACD, volatility,
+                    trend and other technical features.
                 </div>
             </div>
 
-            <div class="sp-capability-card">
-                <div class="sp-capability-title">
-                    🔎 Market scanning
-                </div>
-                <div class="sp-capability-text">
-                    Search a selected stock list using RSI
-                    or model-probability conditions.
+            <div class="capability-card">
+                <div class="capability-icon">🔎</div>
+                <div class="capability-title">Market scanning</div>
+                <div class="capability-text">
+                    Search selected stocks using RSI ranges
+                    and model-probability conditions.
                 </div>
             </div>
 
-            <div class="sp-capability-card">
-                <div class="sp-capability-title">
-                    ⚖️ Stock comparison
-                </div>
-                <div class="sp-capability-text">
-                    Compare several stocks using the same
-                    technical and machine-learning framework.
+            <div class="capability-card">
+                <div class="capability-icon">⚖️</div>
+                <div class="capability-title">Stock comparison</div>
+                <div class="capability-text">
+                    Compare multiple companies using one
+                    consistent analytical framework.
                 </div>
             </div>
 
@@ -501,19 +496,21 @@ if len(st.session_state.messages) == 1:
 
 for message in st.session_state.messages:
 
-    avatar = "🤖" if message["role"] == "assistant" else "👤"
+    avatar = (
+        "🤖"
+        if message["role"] == "assistant"
+        else "👤"
+    )
 
     with st.chat_message(
         message["role"],
         avatar=avatar,
     ):
-        render_message_content(
-            message["content"]
-        )
+        st.markdown(message["content"])
 
 
 # =========================================================
-# CHAT INPUT
+# USER INPUT
 # =========================================================
 
 typed_prompt = st.chat_input(
@@ -544,11 +541,9 @@ if prompt:
         "user",
         avatar="👤",
     ):
-        render_message_content(prompt)
+        st.markdown(prompt)
 
-    previous_messages = (
-        st.session_state.messages[:-1]
-    )
+    previous_messages = st.session_state.messages[:-1]
 
     with st.chat_message(
         "assistant",
@@ -566,12 +561,16 @@ if prompt:
                 )
 
             except Exception as error:
-                answer = (
-                    "I could not complete the request at this time.\n\n"
-                    f"Error: `{error}`"
+                print(
+                    f"SWINGPULSE application error: {error}"
                 )
 
-        render_message_content(answer)
+                answer = (
+                    "Sorry, I could not complete the request right now. "
+                    "Please try again shortly."
+                )
+
+        st.markdown(answer)
 
     st.session_state.messages.append(
         {
@@ -587,11 +586,11 @@ if prompt:
 
 st.markdown(
     """
-    <div class="sp-disclaimer">
+    <div class="footer-note">
         SWINGPULSE is an educational project based on historical data,
-        external market-data services and an experimental machine-learning
-        model. Its output is not financial advice and does not guarantee
-        future performance.
+        external market-data services, technical indicators and an
+        experimental machine-learning model. Its output is not financial
+        advice and does not guarantee future performance.
     </div>
     """,
     unsafe_allow_html=True,
