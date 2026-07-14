@@ -41,11 +41,29 @@ def force_scroll_to_top_once() -> None:
 
     st.components.v1.html(
         "<script>"
-        "function spScrollTop(){ window.parent.scrollTo({top: 0, left: 0, behavior: 'instant'}); }"
+        "function spScrollTop(){"
+        "  try {"
+        "    var doc = window.parent.document;"
+        "    var selectors = ["
+        "      'section.main', '[data-testid=\"stMain\"]',"
+        "      '[data-testid=\"stAppViewContainer\"]',"
+        "      '[data-testid=\"stAppViewBlockContainer\"]',"
+        "      '.main .block-container'"
+        "    ];"
+        "    selectors.forEach(function(sel){"
+        "      var el = doc.querySelector(sel);"
+        "      if (el) { el.scrollTop = 0; }"
+        "    });"
+        "    if (doc.scrollingElement) { doc.scrollingElement.scrollTop = 0; }"
+        "    doc.documentElement.scrollTop = 0;"
+        "    doc.body.scrollTop = 0;"
+        "    window.parent.scrollTo({top: 0, left: 0, behavior: 'instant'});"
+        "  } catch (e) {}"
+        "}"
         "spScrollTop();"
-        "setTimeout(spScrollTop, 50);"
-        "setTimeout(spScrollTop, 250);"
-        "setTimeout(spScrollTop, 600);"
+        "[0, 50, 150, 300, 600, 1000, 1500, 2000].forEach(function(t){"
+        "  setTimeout(spScrollTop, t);"
+        "});"
         "</script>",
         height=0,
     )
