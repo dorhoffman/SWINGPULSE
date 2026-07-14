@@ -21,20 +21,44 @@ DEFAULT_SYMBOLS = [
 ]
 
 SYSTEM_PROMPT = """
-You are SWINGPULSE AI, a bilingual stock-market research agent.
+You are SWINGPULSE AI, a bilingual stock-market research agent built on
+the SWINGPULSE machine-learning model.
 
-Rules:
-1. Answer in the same language as the user.
-2. Use tools for every stock-specific, indicator-specific, comparison,
-   or market-scan request.
-3. Never invent prices, RSI values, probabilities, signals, dates,
-   or market data.
-4. Treat model probability as an experimental estimate, never certainty.
-5. Do not promise profits or provide personalized financial advice.
-6. Keep answers clear and practical.
-7. Do not expose stack traces, secrets, or API keys.
-8. For stock analysis or scans, add a brief note that the result is
-   educational and not financial advice.
+Core rules:
+1. Answer in the same language as the user (Hebrew in, Hebrew out;
+   English in, English out).
+2. Use a tool for every stock-specific, indicator-specific, comparison,
+   or market-scan request. Never answer those from memory.
+3. Never invent prices, RSI values, probabilities, signals, dates, or
+   any other market data. Every number in your answer must come
+   directly from a tool result.
+4. Treat model probability as an experimental estimate, never
+   certainty. Do not promise profits or give personalized financial
+   advice.
+5. Do not expose stack traces, secrets, or API keys.
+
+Formatting rules (this drives how your answers render in the UI, so
+follow them closely):
+- Open a single-stock analysis with one bold headline line stating the
+  symbol, the signal, and the probability, e.g.
+  "**AAPL — Watch (probability 52.3%)**".
+- Follow with a short markdown table of the key figures (close price,
+  RSI, MACD status, trend, volatility). Keep table rows to the figures
+  that actually matter for the question asked, not the entire tool
+  payload.
+- After the table, add 2-4 sentences of plain-language interpretation
+  connecting the figures (e.g. what the RSI + trend combination
+  suggests together), not just a restatement of each number.
+- For compare_stocks or a market scan, use one markdown table ranked
+  by probability (or by the metric the user asked to sort by), then a
+  one-sentence takeaway below it.
+- For explain_indicator, answer in prose, no table needed.
+- Always end a stock analysis, comparison, or scan with one short
+  italic line noting the result is educational, not financial advice.
+  Do not repeat this disclaimer inside an ongoing back-and-forth about
+  the same result — once per new piece of analysis is enough.
+- Keep total answers concise: prefer the table + short interpretation
+  over long paragraphs.
 
 Tool routing:
 - One stock: analyze_stock
@@ -44,6 +68,10 @@ Tool routing:
 - Explain RSI, MACD, EMA, ATR, volatility or Bollinger Bands:
   explain_indicator
 """
+
+REQUEST_TEMPERATURE = 0.4
+
+MAX_TOOL_ROUNDS = 5
 
 TOOLS = [
     {
@@ -173,6 +201,48 @@ def execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     return {"success": False, "message": f"Unknown tool: {tool_name}"}
 
 
+def _create_response(
+    client: OpenAI,
+    model_name: str,
+    input_items: list[Any],
+    retries: int = 2,
+):
+    """
+    Calls the Responses API with a couple of quick retries for
+    transient network/server errors, so a single dropped connection
+    doesn't surface as a full failure to the user.
+    """
+    import time as _time
+
+    last_error: Exception | None = None
+
+    for attempt in range(retries + 1):
+        try:
+            return client.responses.create(
+                model=model_name,
+                instructions=SYSTEM_PROMPT,
+                input=input_items,
+                tools=TOOLS,
+                temperature=REQUEST_TEMPERATURE,
+            )
+        except Exception as error:
+            last_error = error
+            text = str(error).lower()
+
+            non_retryable = (
+                "insufficient_quota" in text
+                or "invalid_api_key" in text
+                or "invalid api key" in text
+            )
+
+            if non_retryable or attempt == retries:
+                raise
+
+            _time.sleep(1.5 * (attempt + 1))
+
+    raise last_error  # pragma: no cover - defensive, loop always returns/raises
+
+
 def _safe_error_message(error: Exception) -> str:
     text = str(error).lower()
 
@@ -227,14 +297,9 @@ def ask_agent(
 
         input_items.append({"role": "user", "content": user_message})
 
-        response = client.responses.create(
-            model=model_name,
-            instructions=SYSTEM_PROMPT,
-            input=input_items,
-            tools=TOOLS,
-        )
+        response = _create_response(client, model_name, input_items)
 
-        for _ in range(5):
+        for _ in range(MAX_TOOL_ROUNDS):
             function_calls = [
                 item for item in response.output
                 if item.type == "function_call"
@@ -273,12 +338,7 @@ def ask_agent(
                     }
                 )
 
-            response = client.responses.create(
-                model=model_name,
-                instructions=SYSTEM_PROMPT,
-                input=input_items,
-                tools=TOOLS,
-            )
+            response = _create_response(client, model_name, input_items)
 
         return (
             "The request required too many consecutive tool calls. "
