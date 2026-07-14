@@ -367,8 +367,11 @@ def ask_agent(
             "Please try a more focused question."
         )
 
-    except Exception as error:
-        return (
-            "SWINGPULSE AI could not complete the request. "
-            f"Error: {error}"
-        )
+   except Exception:
+    return (
+        "Sorry, I'm temporarily unavailable.\n\n"
+        "If you're the developer, please check:\n"
+        "• OpenAI API key\n"
+        "• Billing / Credits\n"
+        "• Internet connection\n"
+    )
