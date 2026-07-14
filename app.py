@@ -25,6 +25,32 @@ def contains_hebrew(text: str) -> bool:
     return bool(re.search(r"[\u0590-\u05FF]", str(text)))
 
 
+def force_scroll_to_top_once() -> None:
+    """
+    st.chat_input has a known Streamlit behavior where the page loads
+    already scrolled down (so the fixed input bar is guaranteed visible),
+    which hides the hero/title on first load. This forces the browser
+    back to the top right after the initial render. It only runs once
+    per session — later reruns (e.g. after sending a message) are left
+    alone, since auto-scrolling to a new answer is normal chat behavior.
+    """
+    if st.session_state.get("_scrolled_to_top"):
+        return
+
+    st.session_state["_scrolled_to_top"] = True
+
+    st.components.v1.html(
+        "<script>"
+        "function spScrollTop(){ window.parent.scrollTo({top: 0, left: 0, behavior: 'instant'}); }"
+        "spScrollTop();"
+        "setTimeout(spScrollTop, 50);"
+        "setTimeout(spScrollTop, 250);"
+        "setTimeout(spScrollTop, 600);"
+        "</script>",
+        height=0,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Signature hero graphic: a heartbeat trace that resolves into a rising
 # candlestick pattern — a literal rendering of "pulse" in SWINGPULSE.
@@ -275,6 +301,8 @@ if "messages" not in st.session_state:
 
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
+
+force_scroll_to_top_once()
 
 
 with st.sidebar:
