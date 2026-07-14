@@ -306,7 +306,7 @@ def ask_agent(
         "content": user_message,
     })
 
-    try:
+       try:
         response = client.responses.create(
             model="gpt-5.6",
             instructions=SYSTEM_PROMPT,
@@ -367,11 +367,11 @@ def ask_agent(
             "Please try a more focused question."
         )
 
-   except Exception:
-    return (
-        "Sorry, I'm temporarily unavailable.\n\n"
-        "If you're the developer, please check:\n"
-        "• OpenAI API key\n"
-        "• Billing / Credits\n"
-        "• Internet connection\n"
-    )
+    except Exception:
+        return (
+            "Sorry, I'm temporarily unavailable.\n\n"
+            "If you're the developer, please check:\n"
+            "• OpenAI API key\n"
+            "• Billing / Credits\n"
+            "• Internet connection\n"
+        )
