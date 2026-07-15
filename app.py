@@ -93,6 +93,95 @@ def _build_hero_signature_data_uri() -> str:
 HERO_SIGNATURE_URI = _build_hero_signature_data_uri()
 
 
+SIGNAL_STYLES = {
+    "Strong Watch": {"color": "#35D0BA", "label": "STRONG WATCH"},
+    "Watch": {"color": "#7B61FF", "label": "WATCH"},
+    "Neutral": {"color": "#8A96B2", "label": "NEUTRAL"},
+    "Low Potential": {"color": "#8A96B2", "label": "LOW POTENTIAL"},
+}
+
+
+def _build_gauge_data_uri(probability_percent: float, color: str) -> str:
+    """
+    Renders a radial probability gauge as a base64 SVG data-URI (same
+    approach as the hero signature graphic, for the same two reasons:
+    Streamlit's unsafe_allow_html breaks on blank lines inside a
+    multi-line HTML string, and it lowercases SVG attribute names like
+    viewBox, which silently breaks rendering).
+    """
+    probability_percent = max(0.0, min(100.0, probability_percent))
+    radius = 50
+    circumference = 2 * 3.14159265 * radius
+    offset = circumference * (1 - probability_percent / 100)
+    label = f"{probability_percent:.1f}%"
+
+    svg = (
+        '<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" '
+        f'role="img" aria-label="Setup probability {label}">'
+        '<circle cx="60" cy="60" r="50" fill="none" stroke="#233150" stroke-width="10"/>'
+        '<circle cx="60" cy="60" r="50" fill="none" '
+        f'stroke="{color}" stroke-width="10" stroke-linecap="round" '
+        f'stroke-dasharray="{circumference:.2f}" stroke-dashoffset="{offset:.2f}" '
+        'transform="rotate(-90 60 60)"/>'
+        f'<text x="60" y="56" text-anchor="middle" font-size="22" font-weight="700" '
+        f'font-family="Arial, sans-serif" fill="#E7ECF4">{label}</text>'
+        '<text x="60" y="76" text-anchor="middle" font-size="10" '
+        'font-family="Arial, sans-serif" fill="#8A96B2">PROBABILITY</text>'
+        '</svg>'
+    )
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+def render_result_card(tool_call: dict | None) -> None:
+    """
+    Renders a visual summary card for tool results that carry a
+    probability/signal (currently analyze_stock). The card is built
+    entirely from the structured tool output — the LLM never touches
+    these numbers, it only narrates around them afterwards.
+    """
+    if not tool_call or tool_call.get("tool_name") != "analyze_stock":
+        return
+
+    data = tool_call.get("data") or {}
+    if not data.get("success"):
+        return
+
+    signal = data.get("signal", "Neutral")
+    style = SIGNAL_STYLES.get(signal, SIGNAL_STYLES["Neutral"])
+    gauge_uri = _build_gauge_data_uri(
+        data.get("probability_percent", 0.0), style["color"]
+    )
+
+    chips = [
+        ("RSI(14)", f'{data.get("rsi_14", "—")} · {data.get("rsi_status", "")}'),
+        ("MACD", data.get("macd_status", "—")),
+        ("Trend", data.get("trend", "—")),
+        ("Volatility(20)", f'{data.get("volatility_20_percent", "—")}%'),
+    ]
+    chips_html = "".join(
+        f'<div class="sp-chip"><span class="sp-chip-k">{k}</span>'
+        f'<span class="sp-chip-v">{v}</span></div>'
+        for k, v in chips
+    )
+
+    st.markdown(
+        '<div class="sp-result-card">'
+        '<div class="sp-result-gauge">'
+        f'<img src="{gauge_uri}" alt="probability gauge" />'
+        "</div>"
+        '<div class="sp-result-main">'
+        f'<div class="sp-result-symbol">{data.get("symbol", "")}'
+        f'<span class="sp-result-price">${data.get("close", "—")}</span></div>'
+        f'<div class="sp-result-badge" style="background:{style["color"]}22;'
+        f'color:{style["color"]};border-color:{style["color"]}55;">{style["label"]}</div>'
+        f'<div class="sp-chip-row">{chips_html}</div>'
+        "</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 def render_wordmark() -> None:
     st.markdown(
         '<div class="sp-wordmark">'
@@ -111,7 +200,7 @@ def render_wordmark() -> None:
     )
 
 
-def render_message(role: str, content: str) -> None:
+def render_message(role: str, content: str, tool_call: dict | None = None) -> None:
     """
     Renders a chat turn as a labeled panel. The role label lives *inside*
     the bubble (top line) instead of as a separate floating row above it,
@@ -134,6 +223,8 @@ def render_message(role: str, content: str) -> None:
         f'<div class="sp-msg-label">{label}</div>',
         unsafe_allow_html=True,
     )
+    if is_assistant:
+        render_result_card(tool_call)
     st.markdown(content)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -290,6 +381,62 @@ st.markdown(
     }
     [data-testid="stChatInput"] textarea::placeholder { color: var(--sp-muted) !important; opacity: 1 !important; }
     [data-testid="stChatInputSubmitButton"] { background: var(--sp-accent) !important; }
+    .sp-result-card {
+        display: flex;
+        align-items: center;
+        gap: 1.2rem;
+        background: var(--sp-panel-2);
+        border: 1px solid var(--sp-border);
+        border-radius: 12px;
+        padding: 1rem 1.2rem;
+        margin: 1.3rem 0 0.6rem;
+        direction: ltr;
+    }
+    .sp-result-gauge img { width: 96px; height: 96px; display: block; }
+    .sp-result-main { flex: 1; min-width: 0; }
+    .sp-result-symbol {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: var(--sp-text);
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+    }
+    .sp-result-price { font-family: 'IBM Plex Mono', monospace; font-size: 0.95rem; color: var(--sp-muted); font-weight: 500; }
+    .sp-result-badge {
+        display: inline-block;
+        margin-top: 0.35rem;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid;
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+    }
+    .sp-chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.7rem; }
+    .sp-chip {
+        display: flex;
+        flex-direction: column;
+        background: var(--sp-panel);
+        border: 1px solid var(--sp-border);
+        border-radius: 8px;
+        padding: 0.3rem 0.6rem;
+        min-width: 84px;
+    }
+    .sp-chip-k {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.62rem;
+        color: var(--sp-muted);
+        letter-spacing: 0.05em;
+    }
+    .sp-chip-v { font-size: 0.82rem; color: var(--sp-text); font-weight: 500; }
+
+    @media (max-width: 500px) {
+        .sp-result-card { flex-direction: column; align-items: flex-start; }
+    }
+
     .sp-footer {
         max-width: 900px; margin: 2.2rem auto 0; border-top: 1px solid var(--sp-border);
         padding-top: 1rem; color: var(--sp-muted); font-size: 0.76rem; line-height: 1.55; text-align: center;
@@ -398,7 +545,7 @@ if len(st.session_state.messages) == 1:
 
 
 for message in st.session_state.messages:
-    render_message(message["role"], message["content"])
+    render_message(message["role"], message["content"], message.get("tool_call"))
 
 
 typed_prompt = st.chat_input("Ask about a stock, indicator, comparison or market scan...")
@@ -424,16 +571,19 @@ if prompt:
             unsafe_allow_html=True,
         )
 
+    tool_call = None
     try:
-        answer = ask_agent(user_message=prompt, conversation_history=previous_messages)
+        answer, tool_call = ask_agent(user_message=prompt, conversation_history=previous_messages)
     except Exception as error:
         print(f"SWINGPULSE application error: {error}")
         answer = "Sorry, I could not complete the request right now. Please try again shortly."
 
     placeholder.empty()
-    render_message("assistant", answer)
+    render_message("assistant", answer, tool_call)
 
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer, "tool_call": tool_call}
+    )
 
 
 st.markdown(
