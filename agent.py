@@ -274,11 +274,22 @@ def _safe_error_message(error: Exception) -> str:
 def ask_agent(
     user_message: str,
     conversation_history: list[dict[str, str]] | None = None,
-) -> str:
+) -> tuple[str, dict[str, Any] | None]:
+    """
+    Returns (answer_text, last_tool_call) where last_tool_call is either
+    None (no tool was used, e.g. small talk or explain_indicator) or a
+    dict {"tool_name": str, "data": dict} describing the most recent
+    successful tool call in this turn. The UI uses this to render a
+    visual result card (probability gauge, signal badge, indicator
+    chips) alongside the LLM's text answer, without the LLM having any
+    part in producing those numbers.
+    """
     user_message = str(user_message).strip()
 
     if not user_message:
-        return "Please enter a question."
+        return "Please enter a question.", None
+
+    last_tool_call: dict[str, Any] | None = None
 
     try:
         client = _get_client()
@@ -306,10 +317,11 @@ def ask_agent(
             ]
 
             if not function_calls:
-                return response.output_text or (
+                answer = response.output_text or (
                     "SWINGPULSE AI completed the request but did not "
                     "produce a text response."
                 )
+                return answer, last_tool_call
 
             input_items.extend(response.output)
 
@@ -320,6 +332,11 @@ def ask_agent(
                         tool_name=function_call.name,
                         arguments=arguments,
                     )
+                    if tool_result.get("success"):
+                        last_tool_call = {
+                            "tool_name": function_call.name,
+                            "data": tool_result,
+                        }
                 except Exception as tool_error:
                     tool_result = {
                         "success": False,
@@ -343,7 +360,7 @@ def ask_agent(
         return (
             "The request required too many consecutive tool calls. "
             "Please ask a more focused question."
-        )
+        ), last_tool_call
 
     except Exception as error:
-        return _safe_error_message(error)
+        return _safe_error_message(error), None
