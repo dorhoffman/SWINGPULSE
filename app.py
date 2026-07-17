@@ -182,6 +182,75 @@ def render_result_card(tool_call: dict | None) -> None:
     )
 
 
+def render_watchlist_proposal(message_index: int, tool_call: dict) -> None:
+    """
+    Renders a confirm/cancel control for a pending watchlist action.
+    Nothing about the user's watchlist changes until they click one of
+    these buttons — the LLM's tool call above only prepared the data,
+    it never touched st.session_state.watchlist itself.
+    """
+    data = tool_call.get("data") or {}
+    if not data.get("success"):
+        return
+
+    resolution = tool_call.get("resolution")
+    symbol = data.get("symbol", "")
+    action = data.get("action", "add")
+
+    if resolution:
+        note = {
+            "added": f"✓ {symbol} added to your watchlist.",
+            "removed": f"✓ {symbol} removed from your watchlist.",
+            "cancelled": "Cancelled — no changes were made.",
+        }.get(resolution, "")
+        st.markdown(f'<div class="sp-confirm-resolved">{note}</div>', unsafe_allow_html=True)
+        return
+
+    close = data.get("close")
+    price_html = f'<span class="sp-confirm-price">${close}</span>' if close else ""
+
+    st.markdown(
+        '<div class="sp-confirm-card">'
+        f'<div class="sp-confirm-text"><b>{symbol}</b> {price_html} — '
+        f'{"add to" if action == "add" else "remove from"} your watchlist?</div>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        confirm_clicked = st.button(
+            "✓ Confirm" if action == "add" else "✓ Remove",
+            key=f"watchlist_confirm_{message_index}",
+        )
+    with col2:
+        cancel_clicked = st.button(
+            "✗ Cancel", key=f"watchlist_cancel_{message_index}"
+        )
+
+    if confirm_clicked:
+        if action == "add":
+            if not any(
+                item["symbol"] == symbol for item in st.session_state.watchlist
+            ):
+                st.session_state.watchlist.append(
+                    {"symbol": symbol, "close": close}
+                )
+            st.session_state.messages[message_index]["tool_call"]["resolution"] = "added"
+        else:
+            st.session_state.watchlist = [
+                item for item in st.session_state.watchlist
+                if item["symbol"] != symbol
+            ]
+            st.session_state.messages[message_index]["tool_call"]["resolution"] = "removed"
+        st.rerun()
+
+    if cancel_clicked:
+        st.session_state.messages[message_index]["tool_call"]["resolution"] = "cancelled"
+        st.rerun()
+
+
 def render_wordmark() -> None:
     st.markdown(
         '<div class="sp-wordmark">'
@@ -200,7 +269,12 @@ def render_wordmark() -> None:
     )
 
 
-def render_message(role: str, content: str, tool_call: dict | None = None) -> None:
+def render_message(
+    role: str,
+    content: str,
+    tool_call: dict | None = None,
+    message_index: int | None = None,
+) -> None:
     """
     Renders a chat turn as a labeled panel. The role label lives *inside*
     the bubble (top line) instead of as a separate floating row above it,
@@ -225,6 +299,12 @@ def render_message(role: str, content: str, tool_call: dict | None = None) -> No
     )
     if is_assistant:
         render_result_card(tool_call)
+        if (
+            tool_call
+            and tool_call.get("tool_name") == "propose_watchlist_action"
+            and message_index is not None
+        ):
+            render_watchlist_proposal(message_index, tool_call)
     st.markdown(content)
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -437,6 +517,32 @@ st.markdown(
         .sp-result-card { flex-direction: column; align-items: flex-start; }
     }
 
+    .sp-confirm-card {
+        background: var(--sp-panel-2);
+        border: 1px dashed var(--sp-accent);
+        border-radius: 10px;
+        padding: 0.7rem 0.9rem;
+        margin: 0.8rem 0 0.5rem;
+        direction: ltr;
+    }
+    .sp-confirm-text { color: var(--sp-text); font-size: 0.9rem; }
+    .sp-confirm-price { font-family: 'IBM Plex Mono', monospace; color: var(--sp-muted); }
+    .sp-confirm-resolved {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.82rem;
+        color: var(--sp-teal);
+        margin: 0.6rem 0;
+        direction: ltr;
+    }
+    .sp-watch-row {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 0.85rem;
+        color: var(--sp-text);
+        padding: 0.45rem 0.1rem;
+        direction: ltr;
+    }
+    .sp-watch-price { color: var(--sp-muted); }
+
     .sp-footer {
         max-width: 900px; margin: 2.2rem auto 0; border-top: 1px solid var(--sp-border);
         padding-top: 1rem; color: var(--sp-muted); font-size: 0.76rem; line-height: 1.55; text-align: center;
@@ -467,6 +573,9 @@ if "messages" not in st.session_state:
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
 
+if "watchlist" not in st.session_state:
+    st.session_state.watchlist = []
+
 force_scroll_to_top_once()
 
 
@@ -486,6 +595,34 @@ with st.sidebar:
     for index, (label, prompt_text) in enumerate(examples):
         if st.button(label, key=f"quick_action_{index}"):
             st.session_state.pending_prompt = prompt_text
+
+    st.divider()
+
+    st.markdown('<div class="sp-sidebar-heading">Watchlist</div>', unsafe_allow_html=True)
+
+    if not st.session_state.watchlist:
+        st.markdown(
+            '<div class="sp-sidebar-card">Empty for now. Ask the agent to '
+            '"add AAPL to my watchlist" to try it — every change needs your '
+            "confirmation first.</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        for item in list(st.session_state.watchlist):
+            wcol1, wcol2 = st.columns([3, 1])
+            with wcol1:
+                price = f' <span class="sp-watch-price">${item["close"]}</span>' if item.get("close") else ""
+                st.markdown(
+                    f'<div class="sp-watch-row">{item["symbol"]}{price}</div>',
+                    unsafe_allow_html=True,
+                )
+            with wcol2:
+                if st.button("✕", key=f"remove_watch_{item['symbol']}"):
+                    st.session_state.watchlist = [
+                        w for w in st.session_state.watchlist
+                        if w["symbol"] != item["symbol"]
+                    ]
+                    st.rerun()
 
     st.divider()
 
@@ -544,8 +681,8 @@ if len(st.session_state.messages) == 1:
     )
 
 
-for message in st.session_state.messages:
-    render_message(message["role"], message["content"], message.get("tool_call"))
+for index, message in enumerate(st.session_state.messages):
+    render_message(message["role"], message["content"], message.get("tool_call"), index)
 
 
 typed_prompt = st.chat_input("Ask about a stock, indicator, comparison or market scan...")
@@ -579,11 +716,12 @@ if prompt:
         answer = "Sorry, I could not complete the request right now. Please try again shortly."
 
     placeholder.empty()
-    render_message("assistant", answer, tool_call)
 
     st.session_state.messages.append(
         {"role": "assistant", "content": answer, "tool_call": tool_call}
     )
+    new_index = len(st.session_state.messages) - 1
+    render_message("assistant", answer, tool_call, new_index)
 
 
 st.markdown(
