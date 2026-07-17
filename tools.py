@@ -600,3 +600,50 @@ def explain_indicator(
         "indicator": key,
         **explanations[key],
     }
+
+
+def propose_watchlist_action(symbol: str, action: str) -> dict[str, Any]:
+    """
+    Prepares an add/remove watchlist action for user confirmation.
+
+    Deliberately does NOT touch any stored watchlist itself — this tool
+    only validates the symbol and, for "add", fetches a current price
+    snapshot so the confirmation UI has context. The actual mutation
+    happens only in the Streamlit app, only after the user clicks an
+    explicit confirm button. This keeps a clear separation between
+    "the agent proposes" and "the human approves and the app executes",
+    so the LLM can never silently change the user's saved data.
+    """
+    symbol = str(symbol).upper().strip()
+    action = str(action).lower().strip()
+
+    if not symbol:
+        return {"success": False, "message": "A stock symbol is required."}
+
+    if action not in {"add", "remove"}:
+        return {
+            "success": False,
+            "message": f"Unknown watchlist action: '{action}'. Use 'add' or 'remove'.",
+        }
+
+    if action == "remove":
+        return {
+            "success": True,
+            "symbol": symbol,
+            "action": "remove",
+            "message": f"Ready to remove {symbol} from the watchlist, pending confirmation.",
+        }
+
+    try:
+        raw_data = download_stock_data(symbol, days_back=30)
+        close_price = round(float(raw_data.iloc[-1]["Close"]), 2)
+    except Exception:
+        close_price = None
+
+    return {
+        "success": True,
+        "symbol": symbol,
+        "action": "add",
+        "close": close_price,
+        "message": f"Ready to add {symbol} to the watchlist, pending confirmation.",
+    }
