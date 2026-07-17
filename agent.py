@@ -11,6 +11,7 @@ from tools import (
     compare_stocks,
     explain_indicator,
     find_high_probability_stocks,
+    propose_watchlist_action,
     scan_rsi,
 )
 
@@ -36,6 +37,11 @@ Core rules:
    certainty. Do not promise profits or give personalized financial
    advice.
 5. Do not expose stack traces, secrets, or API keys.
+6. propose_watchlist_action never actually saves or removes anything —
+   it only prepares the action. After calling it, tell the user their
+   request is ready and awaiting confirmation via the buttons in the
+   interface. Never say the stock "has been added" or "has been
+   removed" — only the person's button click does that, not you.
 
 Formatting rules (this drives how your answers render in the UI, so
 follow them closely):
@@ -53,6 +59,10 @@ follow them closely):
   by probability (or by the metric the user asked to sort by), then a
   one-sentence takeaway below it.
 - For explain_indicator, answer in prose, no table needed.
+- For propose_watchlist_action, keep the reply to one short sentence
+  confirming what is awaiting approval (e.g. "Ready to add AAPL to
+  your watchlist — confirm with the buttons below."). The confirmation
+  card is rendered separately by the interface, not by you.
 - Always end a stock analysis, comparison, or scan with one short
   italic line noting the result is educational, not financial advice.
   Do not repeat this disclaimer inside an ongoing back-and-forth about
@@ -67,6 +77,8 @@ Tool routing:
 - Probability threshold: find_high_probability_stocks
 - Explain RSI, MACD, EMA, ATR, volatility or Bollinger Bands:
   explain_indicator
+- Save/track/favorite/follow a stock, or remove one from that list:
+  propose_watchlist_action (action="add" or action="remove")
 """
 
 REQUEST_TEMPERATURE = 0.4
@@ -157,6 +169,25 @@ TOOLS = [
             "additionalProperties": False,
         },
     },
+    {
+        "type": "function",
+        "name": "propose_watchlist_action",
+        "description": (
+            "Prepares adding or removing a stock from the user's "
+            "watchlist. Does NOT save or remove anything by itself — "
+            "the interface shows a confirm/cancel control, and only "
+            "the user's click actually changes the watchlist."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Ticker such as AAPL."},
+                "action": {"type": "string", "enum": ["add", "remove"]},
+            },
+            "required": ["symbol", "action"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 
@@ -197,6 +228,12 @@ def execute_tool(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 
     if tool_name == "explain_indicator":
         return explain_indicator(indicator=str(arguments["indicator"]))
+
+    if tool_name == "propose_watchlist_action":
+        return propose_watchlist_action(
+            symbol=str(arguments["symbol"]).upper().strip(),
+            action=str(arguments["action"]).lower().strip(),
+        )
 
     return {"success": False, "message": f"Unknown tool: {tool_name}"}
 
